@@ -1,6 +1,6 @@
 # dsh-passbook 语义文档 v0.1 — 隐私密码本
 
-> 版本 v0.1 · 2026-09-17 · 作者：爱丽丝 · 状态：**已实现（8 工具 + 纯逻辑层 + 轨迹 + 端到端自检；验收 15/17，见 §7）**
+> 版本 v0.1 · 2026-09-17 · 作者：爱丽丝 · 状态：**已验收（8 工具 + 纯逻辑层 + 审计轨迹 + 端到端自检；验收 20/20 全实测，见 §7）**
 > 开发模式：语义文档优先——先写下「它应当是什么」，再让实现逼近，最后由实践回修本文档。
 > 实现落点：`self-plugins/dsh-passbook/src/passbook.ts`（纯逻辑）+ `src/index.ts`（工具层）+ `scripts/verify-pipeline.mjs`（端到端）。
 > 存储真源：`projects/self/alice-identity/scripts/vault.ps1`（**本插件不写另一份库**）。
@@ -141,10 +141,13 @@
 | A13 | `-Force` 闸门真会拦 | 无 `-Force` 取秘密 → 退出码 6 且提示 `-Force` | 同上 | 已实测 ✔ |
 | A14 | 字段级合并不抹字段 | 二次 `set` 只给 totp 后，password 仍在 | 同上 | 已实测 ✔ |
 | A15 | 夹具隔离（不碰真库） | 全链路 `-VaultPath` 指向临时目录；删除干净 | 同上 | 已实测 ✔ |
-| A16 | 工具装载后可用（模型可见面） | `passbook_list` 返回真实条目元数据 | 挂载后调用 | 待线上验收 |
-| A17 | 装载后自检通过 | `passbook_selftest` → `passed == total` | 挂载后调用 | 待线上验收 |
+| A16 | 工具装载后可用（模型可见面） | `passbook_list` 返回真实条目元数据 | 挂载后调用 → `ok:true count:25`（与真库条目数一致） | 已实测 ✔ |
+| A17 | 装载后自检通过 | `passbook_selftest` → `passed == total` | 挂载后调用 → `ok`（轨迹 `detail:"11/11"`） | 已实测 ✔ |
+| A18 | render 契约：返回值而非参数 | 所有工具 render 走 `textOut(_args, value)` | `pnpm test` 契约组（6 条源码级断言） | 已实测 ✔ |
+| A19 | 体检语义精确：recovery-only 不误报 | 只有 `recovery` 的条目不报「无凭据」 | `pnpm test` → 39/39 | 已实测 ✔ |
+| A20 | 体检不泄漏无闸门字段内容 | deep 检出 notes 疑似秘密，但报告不含其内容 | 同上 | 已实测 ✔ |
 
-**统计**：总数 17 · 已实测 15 · 待线上验收 2 ⇒ **不得声明 `verified`**（§5.20：`verified` 要求 pending==0）。
+**统计**：总数 20 · 已实测 20 · 待线上验收 0 ⇒ **可判 `verified`**（§5.20：`verified` 要求 pending==0）。
 
 ---
 
@@ -154,6 +157,9 @@
 |---|---|---|
 | 2026-09-17 | 初版（主人指令「创建一个新的插件，叫做隐私密码本插件」） | 首版契约即含 I1–I7 与 A1–A17 |
 | 2026-09-17 | 构建期 `noUncheckedIndexedAccess` 报 TS2345 ×2（索引取值 `string \| undefined`） | 字符池取值加非空断言；**不外扩**（断言点仅两处，均为「随机索引必命中」的语义事实） |
+| 2026-09-17 | **挂载后工具显示 `{}`**：`textOut` 写成单参 `(v)`，而 render 契约是 `(args, value)` ⇒ 渲染出的是**参数**；审计轨迹同刻显示 `ok · 25 条` 证明工具其实成功 | 改回两参（`_args, value`），并加 6 条**源码级契约测试**（A18）钉死该契约；同时立下一条经验：**显示层骗人时看机制自证的落盘证据** |
+| 2026-09-17 | 线上体检误报 `no-password: wallet-btc`（只有 recovery，本就不该有 password） | 判据改「**无任何凭据字段**」`no-credential`（A19）；并新增深检 `secret-in-ungated-field`（A20）——把「秘密躺在不经闸门的 notes 里」从模糊感觉变成可检出项 |
+| 2026-09-17 | 脚手架**未生成** `cordis.patch.yml` / `dsh.bundle`：`dsh plugin add` 实测只装成普通依赖而**不激活** | README 改为与事实一致的安装说明；本机装载走 `plugin_mount`（link + patch insert + 预检 + 哨兵重启）。跨机安装缺口记入 Q5 |
 
 ---
 
@@ -163,3 +169,5 @@
 2. **Q2**：`passbook_use` 的子进程输出脱敏只覆盖「精确值 / URL 编码 / base64」三形态；十六进制或分片输出仍可能漏 ⇒ 是否加「长度+字符集启发式」误伤风险待定。
 3. **Q3**：是否需要 `passbook_rotate`（生成新值 → 写入 → 返回旧值指纹用于核对上游站点）？**待定**。
 4. **Q4**：轨迹文件与 memory 的边界——「我取过哪条」是否也该进记忆库？倾向**不进**（轨迹是审计面，记忆是行为面）。
+5. **Q5**：跨机分发缺口——本仓无 `cordis.patch.yml` / `package.json.dsh.bundle`，`dsh plugin add` 只会装成普通依赖而**不激活**（2026-09-17 scratch profile 实测文案：`declares no dsh.bundle — installed as a plain dependency, not a profile layer`）。**未做**（本机装载走 `plugin_mount`，不受影响；跨机前须补）。
+6. **Q6**：`passbook_audit` 的 `deep` 会把全部口令读进插件进程内存——这是算强度/查复用的必要代价，但**是否该再加一道约束**（如单次只允许取前 N 条 / 需显式二次确认）？**待定**。
