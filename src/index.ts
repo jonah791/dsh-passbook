@@ -140,7 +140,9 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
-  const textOut = (v: unknown): Array<{ type: 'text'; text: string }> => [{ type: 'text', text: JSON.stringify(v) }]
+  // render 签名是 (args, value)：第一参是参数、**第二参才是返回值**。
+  // 写成单参会把参数渲染出来（实测踩过一次：工具调用显示 {} 而轨迹显示 ok）。
+  const textOut = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [{ type: 'text', text: JSON.stringify(value) }]
 
   // ── 1. 列出条目（非密元数据） ────────────────────────────────────────────
   ctx.tools.register(defineTool({
