@@ -502,14 +502,22 @@ export function apply(ctx: Context, config: Config): void {
       const entries: VaultEntryMeta[] = parsed.entries
       const deep = args.deep === true
       const values: Record<string, { password?: string }> = {}
+      const plainFields: Record<string, { notes?: string }> = {}
       if (deep) {
         for (const e of entries) {
-          if (!e.fields.includes('password')) continue
-          const got = await runVault('get', { site: e.site, field: 'password', force: true })
-          if (got.code === 0) values[e.site] = { password: got.stdout.replace(/\r?\n$/, '') }
+          if (e.fields.includes('password')) {
+            const got = await runVault('get', { site: e.site, field: 'password', force: true })
+            if (got.code === 0) values[e.site] = { password: got.stdout.replace(/\r?\n$/, '') }
+          }
+          // notes 是**非密字段**（不需 -Force）⇒ 顺带扫「秘密是否躺在无闸门字段里」。
+          // 命中只记形状，不记值（值不进报告、不进轨迹）。
+          if (e.fields.includes('notes')) {
+            const gotNotes = await runVault('get', { site: e.site, field: 'notes' })
+            if (gotNotes.code === 0) plainFields[e.site] = { notes: gotNotes.stdout.replace(/\r?\n$/, '') }
+          }
         }
       }
-      const report = planAudit(entries, values, { rotationDays: args.rotationDays ?? config.rotationDays, deep })
+      const report = planAudit(entries, values, { rotationDays: args.rotationDays ?? config.rotationDays, deep, plainFields })
       const findings = report.findings.map((f) => `${f.kind}: ${f.site} — ${f.detail}`)
       appendTrace({
         atMs: Date.now(), tool: 'passbook_audit', action: 'audit', outcome: 'ok',

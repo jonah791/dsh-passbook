@@ -17,6 +17,9 @@ export const SECRET_FIELDS: readonly PassField[] = ['password', 'totp', 'recover
 /** vault.ps1 所知的字段全集。 */
 export const ALL_FIELDS: readonly PassField[] = ['password', 'totp', 'recovery', 'notes', 'username']
 
+/** 疑似秘密的形状——用于发现「秘密躺在无闸门字段里」。**只报形状，不报值。** */
+const SECRETISH = /(api[-_]?token|bearer\s|ghp_|sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|-----BEGIN|[A-Za-z0-9+/]{40,}={0,2})/i
+
 export interface VaultEntryMeta {
   site: string
   username: string
@@ -226,7 +229,8 @@ export function needsConfirmation(field: PassField): boolean {
 
 export interface AuditFinding {
   site: string
-  kind: 'stale' | 'no-password' | 'weak' | 'reused' | 'no-totp'
+  /** no-credential = 条目**无任何凭据字段**（≠「缺 password」：recovery-only 的条目本就不该有 password） */
+  kind: 'stale' | 'no-credential' | 'weak' | 'reused' | 'secret-in-ungated-field'
   detail: string
 }
 
@@ -245,11 +249,12 @@ export interface AuditReport {
 export function planAudit(
   entries: VaultEntryMeta[],
   values: Record<string, { password?: string }> = {},
-  opts: { nowMs?: number; rotationDays?: number; deep?: boolean } = {},
+  opts: { nowMs?: number; rotationDays?: number; deep?: boolean; plainFields?: Record<string, { notes?: string }> } = {},
 ): AuditReport {
   const nowMs = opts.nowMs ?? Date.now()
   const rotationDays = opts.rotationDays ?? 180
   const deep = opts.deep ?? false
+  const plainFields = opts.plainFields ?? {}
   const findings: AuditFinding[] = []
   const byFingerprint = new Map<string, string[]>()
 
@@ -258,10 +263,18 @@ export function planAudit(
     if (age !== null && age > rotationDays) {
       findings.push({ site: e.site, kind: 'stale', detail: `距上次更新 ${Math.round(age)} 天（阈值 ${rotationDays} 天）` })
     }
-    if (!e.fields.includes('password')) {
-      findings.push({ site: e.site, kind: 'no-password', detail: `条目未存 password（字段：[${e.fields.join(',')}]）` })
+    // 语义精确（§5.9 规则 1）：判据是「**有没有凭据字段**」，不是「有没有 password」。
+    // 实测误报：wallet-btc（只有 recovery）、cloudflare-api（只有 notes）被判「缺 password」——
+    // 前者本就不该有 password，后者的问题不是「缺」而是「秘密躺在非密字段里」（见下）。
+    const hasSecret = e.fields.some((f) => (SECRET_FIELDS as readonly string[]).includes(f))
+    if (!hasSecret) {
+      findings.push({ site: e.site, kind: 'no-credential', detail: `条目无任何凭据字段（字段：[${e.fields.join(',')}]）——确认是否漏存` })
     }
     if (deep) {
+      const notes = plainFields[e.site]?.notes ?? ''
+      if (notes && SECRETISH.test(notes)) {
+        findings.push({ site: e.site, kind: 'secret-in-ungated-field', detail: 'notes 疑似含秘密（非凭据字段 ⇒ 不经确认闸门、不享 -Force 保护）——建议移入 password/recovery' })
+      }
       const pw = values[e.site]?.password
       if (pw) {
         const s = estimateStrength(pw)

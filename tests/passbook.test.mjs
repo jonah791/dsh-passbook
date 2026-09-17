@@ -226,14 +226,29 @@ const ENTRIES = [
   { site: 'no-pw', username: 'c', fields: ['notes'], updatedAt: new Date().toISOString() },
 ]
 
-test('planAudit：陈旧与缺 password 都能检出', () => {
-  const r = planAudit(ENTRIES, {}, { nowMs: Date.parse('2026-09-17T00:00:00Z'), rotationDays: 180 })
+test('planAudit：陈旧与无凭据字段都能检出（recovery-only 不误报）', () => {
+  const entries = [
+    ...ENTRIES,
+    { site: 'recovery-only', username: 'd', fields: ['recovery'], updatedAt: new Date().toISOString() },
+  ]
+  const r = planAudit(entries, {}, { nowMs: Date.parse('2026-09-17T00:00:00Z'), rotationDays: 180 })
   const kinds = r.findings.map((f) => `${f.kind}:${f.site}`)
   assert.ok(kinds.includes('stale:stale'))
-  assert.ok(kinds.includes('no-password:no-pw'))
+  assert.ok(kinds.includes('no-credential:no-pw'))
   assert.ok(!kinds.includes('stale:fresh'))
-  assert.equal(r.total, 3)
+  assert.ok(!kinds.some((k) => k.includes('recovery-only')), 'recovery-only 条目不得被判「无凭据」——它本就该只有 recovery（语义精确）')
   assert.equal(r.deep, false)
+})
+
+test('planAudit：deep 检出「秘密躺在无闸门字段里」（只报形状，不报值）', () => {
+  const token = 'api-token=abcdefghijklmnopqrstuvwxyz0123456789ABCD'
+  const entries = [{ site: 'cloudflare-api', username: '', fields: ['notes'], updatedAt: new Date().toISOString() }]
+  const r = planAudit(entries, {}, { deep: true, plainFields: { 'cloudflare-api': { notes: token } } })
+  const f = r.findings.find((x) => x.kind === 'secret-in-ungated-field')
+  assert.ok(f, '应检出无闸门字段里的秘密')
+  assert.ok(!JSON.stringify(r).includes(token), '体检报告泄漏了字段内容')
+  const clean = planAudit(entries, {}, { deep: true, plainFields: { 'cloudflare-api': { notes: '普通备注：注册于 2026-09-16' } } })
+  assert.ok(!clean.findings.some((x) => x.kind === 'secret-in-ungated-field'), '普通备注不得误报')
 })
 
 test('planAudit：浅层不得要求值（values 为空也不报错）', () => {
