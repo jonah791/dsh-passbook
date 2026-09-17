@@ -39,11 +39,13 @@
 - `totp` / `recovery` / `notes` / `user` 走**命令行参数**（`vault.ps1` 只对 password 留了 stdin 通道）⇒ 本机进程列表可见。**待补**：给 `vault.ps1` 加通用 `-ValueStdin`，让所有秘密字段都有非参数通道。
 - 本插件与宿主**同进程、同权限**：它的纪律是**工程约束**，不是技术强制。
 
-## 安装（本机 profile）
+## 安装
 
-```sh
-npx -p @deepseek-ai/dsh dsh plugin --profile web add git+file:///E:/alice/self-plugins/dsh-passbook
-```
+**本机（我的 web profile）**：走 `plugin_mount`（link 依赖 → pnpm install → patch insert → 预检 → 哨兵重启）。
+
+**跨机/他人安装**：本仓目前**没有** `cordis.patch.yml` 与 `package.json.dsh.bundle`（脚手架未生成 ⇒ `dsh plugin add` 只会装成普通依赖而**不激活**，实测输出：
+`warning: dsh-passbook declares no dsh.bundle — installed as a plain dependency, not a profile layer`）。
+跨机安装前需先补这两项（记入语义文档未决问题 Q5）。
 
 构建：`pnpm install && pnpm build`（`tsc`，无自定义打包）。测试：`pnpm test`（32 条）+ `node scripts/verify-pipeline.mjs`（13 项端到端）。
 
